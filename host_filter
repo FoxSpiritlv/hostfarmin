@@ -1,0 +1,101 @@
+import xml.etree.ElementTree as ET
+import csv
+import openpyxl
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font
+from tkinter import Tk
+from tkinter.filedialog import askopenfilenames, asksaveasfilename
+import requests
+from bs4 import BeautifulSoup
+def get_port_info():
+    url = "https://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, "html.parser")
+    port_info = {}
+    port_info['22'] = {'description': 'SSH', 'group': 'remote login'}
+    port_info['80'] = {'description': 'HTTP', 'group': 'web'}
+    port_info['443'] = {'description': 'HTTPS', 'group': 'web'}
+    return port_info
+def parse_xml_file(xml_file):
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    results = []
+    for host in root.findall('host'):
+        address = host.find('address').attrib['addr']
+        hostname = host.find('hostnames/hostname').attrib.get('name', 'Unknown') if host.find('hostnames/hostname') else 'Unknown'
+        state = host.find('status').attrib['state']
+        
+        for port in host.find('ports').findall('port'):
+            port_id = port.attrib['portid']
+            protocol = port.attrib['protocol']
+            service_name = port.find('service').attrib.get('name', 'Unknown')
+            service_info = port.find('service').attrib.get('product', '') + ' ' + port.find('service').attrib.get('version', '')
+            results.append({
+                'hostname': hostname,
+                'ip': address,
+                'port': port_id,
+                'service': service_name,
+                'protocol': protocol
+            })
+    return results
+def parse_csv_file(csv_file):
+    results = []
+    with open(csv_file, newline='', encoding='utf-8') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            results.append({
+                'hostname': row.get('hostname', 'Unknown'),
+                'ip': row.get('ip', 'Unknown'),
+                'port': row.get('port', 'Unknown'),
+                'service': row.get('service', 'Unknown'),
+                'protocol': row.get('protocol', 'Unknown')
+            })
+    return results
+def save_to_excel(data, xlsx_file):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Scan Results"
+    header_font = Font(bold=True)
+    headers = ["Hostname", "IP Address", "Port", "Service", "Protocol", "Description", "Group"]
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.value = header
+        cell.font = header_font
+    port_info = get_port_info()
+    row_num = 2
+    for entry in data:
+        hostname = entry['hostname']
+        ip_address = entry['ip']
+        port = entry['port']
+        service = entry['service']
+        protocol = entry['protocol']
+        description = port_info.get(port, {}).get('description', 'Unknown')
+        group = port_info.get(port, {}).get('group', 'Unknown')
+        ws.cell(row=row_num, column=1, value=hostname)
+        ws.cell(row=row_num, column=2, value=ip_address)
+        ws.cell(row=row_num, column=3, value=port)
+        ws.cell(row=row_num, column=4, value=service)
+        ws.cell(row=row_num, column=5, value=protocol)
+        ws.cell(row=row_num, column=6, value=description)
+        ws.cell(row=row_num, column=7, value=group)
+        row_num += 1
+    wb.save(xlsx_file)
+    print(f"Файл сохранен как {xlsx_file}")
+def main():
+    Tk().withdraw()
+    files = askopenfilenames(title="Выберите файлы (XML или CSV)", filetypes=[("XML files", "*.xml"), ("CSV files", "*.csv")])
+    if not files:
+        print("Файлы не выбраны.")
+        return
+    xlsx_file = asksaveasfilename(title="Сохранить как", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
+    if not xlsx_file:
+        print("Файл для сохранения не выбран.")
+        return
+    all_data = []
+    for file in files:
+        if file.endswith('.xml'):
+            all_data.extend(parse_xml_file(file))
+        elif file.endswith('.csv'):
+            all_data.extend(parse_csv_file(file))
+    save_to_excel(all_data, xlsx_file)
+main()
